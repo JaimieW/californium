@@ -24,7 +24,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
 import org.eclipse.californium.elements.rule.TestNameLoggerRule;
-import org.eclipse.californium.interoperability.test.OpenSslProcessUtil.AuthenticationMode;
+import org.eclipse.californium.interoperability.test.OpenSslUtil.AuthenticationMode;
 import org.eclipse.californium.interoperability.test.ProcessUtil.ProcessResult;
 import org.eclipse.californium.scandium.config.DtlsConnectorConfig;
 import org.eclipse.californium.scandium.dtls.cipher.CipherSuite;
@@ -60,8 +60,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	@BeforeClass
 	public static void init() throws IOException, InterruptedException {
 		processUtil = new OpenSslProcessUtil();
-		processUtil.execute("openssl", "version");
-		ProcessResult result = processUtil.waitResult(TIMEOUT_MILLIS);
+		ProcessResult result = processUtil.getOpenSslVersion(TIMEOUT_MILLIS);
 		assumeNotNull(result);
 		assumeTrue(result.contains("OpenSSL 1\\.1\\."));
 		scandiumUtil = new ScandiumUtil(false);
@@ -91,7 +90,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientCertTrustAll() throws Exception {
 		scandiumUtil.start(BIND, null, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.CERTIFICATE);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.CERTIFICATE, cipherSuite);
 		connect(cipher);
 	}
 
@@ -99,7 +98,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientChainTrustAll() throws Exception {
 		scandiumUtil.start(BIND, null, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.CHAIN);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.CHAIN, cipherSuite);
 		connect(cipher);
 	}
 
@@ -107,7 +106,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientTrustTrustAll() throws Exception {
 		scandiumUtil.start(BIND, null, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, cipherSuite);
 		connect(cipher);
 	}
 
@@ -115,7 +114,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientCertTrustCa() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_CA, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.CERTIFICATE);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.CERTIFICATE, cipherSuite);
 		connect(cipher);
 	}
 
@@ -123,7 +122,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientChainTrustCa() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_CA, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.CHAIN);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.CHAIN, cipherSuite);
 		connect(cipher);
 	}
 
@@ -131,7 +130,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientTrustTrustCa() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_CA, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, cipherSuite);
 		connect(cipher);
 	}
 
@@ -140,7 +139,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientCertTrustRoot() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.CERTIFICATE);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.CERTIFICATE, cipherSuite);
 		connect(cipher);
 	}
 
@@ -148,7 +147,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientChainTrustRoot() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.CHAIN);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.CHAIN, cipherSuite);
 		connect(cipher);
 	}
 
@@ -156,7 +155,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientTrustTrustRoot() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, cipherSuite);
 		connect(cipher);
 	}
 
@@ -168,7 +167,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 		scandiumUtil.start(BIND, false, dtlsBuilder, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, cipherSuite);
 		connect(cipher);
 	}
 
@@ -177,7 +176,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 		assumeTrue("X25519 not support by JRE", XECDHECryptography.SupportedGroup.X25519.isUsable());
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, "X25519:prime256v1", AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, "X25519:prime256v1", null, cipherSuite);
 		connect(cipher, "X25519");
 	}
 
@@ -186,7 +185,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 		assumeTrue("X448 not support by JRE", XECDHECryptography.SupportedGroup.X448.isUsable());
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, "X448:prime256v1", AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, "X448:prime256v1", null, cipherSuite);
 		connect(cipher, "X448");
 	}
 
@@ -194,7 +193,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientPrime256v1() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, "prime256v1", AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, "prime256v1", null, cipherSuite);
 		connect(cipher, "ECDH, P-256");
 	}
 
@@ -202,7 +201,7 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientSecP384r1() throws Exception {
 		scandiumUtil.start(BIND, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, "secp384r1:prime256v1", AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, "secp384r1:prime256v1", null, cipherSuite);
 		connect(cipher, "ECDH, P-384");
 	}
 
@@ -210,8 +209,8 @@ public class OpenSslClientAuthenticationInteroperabilityTest {
 	public void testOpenSslClientMixedCertificatChain() throws Exception {
 		scandiumUtil.start(BIND, true, null, ScandiumUtil.TRUST_ROOT, cipherSuite);
 
-		String cipher = processUtil.startupClient(DESTINATION, cipherSuite, OpenSslProcessUtil.DEFAULT_CURVES,
-				OpenSslProcessUtil.DEFAULT_SIGALGS, AuthenticationMode.TRUST);
+		String cipher = processUtil.startupClient(DESTINATION, AuthenticationMode.TRUST, OpenSslProcessUtil.DEFAULT_CURVES,
+				OpenSslProcessUtil.DEFAULT_SIGALGS, cipherSuite);
 		connect(cipher);
 	}
 
