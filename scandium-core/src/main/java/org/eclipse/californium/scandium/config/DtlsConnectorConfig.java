@@ -43,7 +43,11 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+
+import javax.security.auth.x500.X500Principal;
 
 import org.eclipse.californium.elements.DtlsEndpointContext;
 import org.eclipse.californium.elements.util.CertPathUtil;
@@ -56,6 +60,8 @@ import org.eclipse.californium.scandium.dtls.CertificateMessage;
 import org.eclipse.californium.scandium.dtls.CertificateRequest;
 import org.eclipse.californium.scandium.dtls.CertificateType;
 import org.eclipse.californium.scandium.dtls.ConnectionIdGenerator;
+import org.eclipse.californium.scandium.dtls.InMemoryMasterSecretDeriver;
+import org.eclipse.californium.scandium.dtls.MasterSecretDeriver;
 import org.eclipse.californium.scandium.dtls.SessionCache;
 import org.eclipse.californium.scandium.dtls.SignatureAndHashAlgorithm;
 import org.eclipse.californium.scandium.dtls.cipher.CipherSuite;
@@ -154,6 +160,11 @@ public final class DtlsConnectorConfig {
 	 * Certificate verifier for dynamic trust.
 	 */
 	private CertificateVerifier certificateVerifier;
+	
+	/**
+	 * Functionality to derive the Master Secret.
+	 */
+	private MasterSecretDeriver masterSecretDeriver;
 
 	/**
 	 * Experimental feature : Stop retransmission at message receipt
@@ -715,6 +726,16 @@ public final class DtlsConnectorConfig {
 	 */
 	public CertificateVerifier getCertificateVerifier() {
 		return certificateVerifier;
+	}
+	
+	/**
+	 * Gets the function in charge of deriving the Master Secret during the 
+	 * DTLS Handshake
+	 * 
+	 * @return the master secret deriver
+	 */
+	public MasterSecretDeriver getMasterSecretDeriver() {
+		return masterSecretDeriver;
 	}
 
 	/**
@@ -2055,6 +2076,10 @@ public final class DtlsConnectorConfig {
 		 * intermediate CA certificates may fail, if the other peer send a
 		 * certificate chain, which doesn't end at one of the provided CAs.
 		 * 
+		 * {@code trustedCerts} MUST NOT contain several certificates with same
+		 * subject. If you need that you should consider to use
+		 * {@link #setCertificateVerifier(CertificateVerifier)} instead.
+		 * 
 		 * This method must not be called, if
 		 * {@link #setCertificateVerifier(CertificateVerifier)} is already set.
 		 * 
@@ -2064,7 +2089,7 @@ public final class DtlsConnectorConfig {
 		 * @return this builder for command chaining
 		 * @throws NullPointerException if the given array is <code>null</code>
 		 * @throws IllegalArgumentException if the array contains a non-X.509
-		 *             certificate
+		 *             certificate or several certificates with same subjects
 		 * @throws IllegalStateException if
 		 *             {@link #setCertificateVerifier(CertificateVerifier)} is
 		 *             already set.
@@ -2073,12 +2098,14 @@ public final class DtlsConnectorConfig {
 		public Builder setTrustStore(Certificate[] trustedCerts) {
 			if (trustedCerts == null) {
 				throw new NullPointerException("Trust store must not be null");
-			} else if (trustedCerts.length == 0) {
-				config.trustStore = new X509Certificate[0];
 			} else if (config.certificateVerifier != null) {
 				throw new IllegalStateException("Trust store must not be used after certificate verifier is set!");
+			} else if (trustedCerts.length == 0) {
+				config.trustStore = new X509Certificate[0];
 			} else {
-				config.trustStore = SslContextUtil.asX509Certificates(trustedCerts);
+				X509Certificate[] certificates = SslContextUtil.asX509Certificates(trustedCerts);
+				checkTrustStore(certificates);
+				config.trustStore = certificates;
 			}
 			return this;
 		}
@@ -2112,6 +2139,14 @@ public final class DtlsConnectorConfig {
 				throw new IllegalStateException("CertificateVerifier must not be used after trust store is set!");
 			}
 			config.certificateVerifier = verifier;
+			return this;
+		}
+		
+		public Builder setMasterSecretDeriver(MasterSecretDeriver deriver) {
+			if(deriver == null) {
+				throw new NullPointerException("MasterSecretDeriver must not be null");
+			}
+			config.masterSecretDeriver = deriver;
 			return this;
 		}
 
@@ -2723,6 +2758,10 @@ public final class DtlsConnectorConfig {
 			if (config.cipherSuiteSelector == null && !config.clientOnly) {
 				config.cipherSuiteSelector = new DefaultCipherSuiteSelector();
 			}
+			
+			if (config.masterSecretDeriver == null) {
+				config.masterSecretDeriver = new InMemoryMasterSecretDeriver();
+			}
 
 			// check cipher consistency
 			if (config.supportedCipherSuites == null || config.supportedCipherSuites.isEmpty()) {
@@ -2771,8 +2810,9 @@ public final class DtlsConnectorConfig {
 			}
 
 			if (ecc) {
-				if (!config.supportedSignatureAlgorithms.isEmpty()) {
-					verifySignatureAndHashAlgorithms();
+				if (config.supportedSignatureAlgorithms.isEmpty()) {
+					config.supportedSignatureAlgorithms = SignatureAndHashAlgorithm
+							.getDefaultSignatureAlgorithms(config.certChain);
 				}
 				if (config.supportedGroups.isEmpty()) {
 					config.supportedGroups = getDefaultSupportedGroups();
@@ -2810,6 +2850,7 @@ public final class DtlsConnectorConfig {
 					throw new IllegalStateException("certificate has no proper key usage!");
 				}
 			}
+			verifySignatureAndHashAlgorithms(config.supportedSignatureAlgorithms);
 			verifySupportedGroups(config.supportedGroups);
 			config.trustCertificateTypes = ListUtils.init(config.trustCertificateTypes);
 			config.identityCertificateTypes = ListUtils.init(config.identityCertificateTypes);
@@ -2908,15 +2949,13 @@ public final class DtlsConnectorConfig {
 			config.supportedCipherSuites = ciphers;
 		}
 
-		private void verifySignatureAndHashAlgorithms() {
+		private void verifySignatureAndHashAlgorithms(List<SignatureAndHashAlgorithm> list) {
 			if (config.publicKey != null) {
-				if (SignatureAndHashAlgorithm.getSupportedSignatureAlgorithm(config.supportedSignatureAlgorithms,
-						config.publicKey) == null) {
+				if (SignatureAndHashAlgorithm.getSupportedSignatureAlgorithm(list, config.publicKey) == null) {
 					throw new IllegalStateException("supported signature and hash algorithms doesn't match the public key!");
 				}
 				if (config.certChain != null) {
-					if (!SignatureAndHashAlgorithm.isSignedWithSupportedAlgorithms(config.supportedSignatureAlgorithms,
-							config.certChain)) {
+					if (!SignatureAndHashAlgorithm.isSignedWithSupportedAlgorithms(list, config.certChain)) {
 						throw new IllegalStateException(
 								"supported signature and hash algorithms doesn't match the certificate chain!");
 					}
@@ -2975,6 +3014,18 @@ public final class DtlsConnectorConfig {
 				if (config.recommendedSupportedGroupsOnly && !group.isRecommended()) {
 					throw new IllegalStateException(
 							"public key used with unrecommended group (curve) " + group.name() + "!");
+				}
+			}
+		}
+
+		private void checkTrustStore(X509Certificate[] store) {
+			List<X500Principal> subjects = CertPathUtil.toSubjects(Arrays.asList(store));
+
+			// Search for duplicates
+			Set<X500Principal> set = new HashSet<>();
+			for (X500Principal subject : subjects) {
+				if (!set.add(subject)) {
+					throw new IllegalStateException("Truststore contains 2 certificates with same subject: " + subject);
 				}
 			}
 		}

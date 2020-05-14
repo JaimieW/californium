@@ -142,11 +142,18 @@ public abstract class Handshaker implements Destroyable {
 	private boolean destroyed;
 
 	protected final DTLSSession session;
+
+	/** 
+	 * The logic in charge of deriving the Master Secret 
+	 */
+	protected final MasterSecretDeriver masterSecretDeriver;
+	
 	/**
 	 * The logic in charge of verifying the chain of certificates asserting this
 	 * handshaker's identity
 	 */
 	protected final CertificateVerifier certificateVerifier;
+	
 
 	/** The trusted raw public keys */
 	protected final TrustedRpkStore rpkStore;
@@ -316,6 +323,7 @@ public abstract class Handshaker implements Destroyable {
 		this.publicKey = config.getPublicKey();
 		this.certificateChain = config.getCertificateChain();
 		this.certificateVerifier = config.getCertificateVerifier();
+		this.masterSecretDeriver = config.getMasterSecretDeriver();
 		this.rpkStore = config.getRpkTrustStore();
 		this.pskStore = config.getPskStore();
 		this.session.setMaxTransmissionUnit(maxTransmissionUnit);
@@ -885,11 +893,7 @@ public abstract class Handshaker implements Destroyable {
 	 */
 	private SecretKey generateMasterSecret(SecretKey premasterSecret) {
 		byte[] randomSeed = Bytes.concatenate(clientRandom, serverRandom);
-		byte[] secret = PseudoRandomFunction.doPRF(session.getCipherSuite().getThreadLocalPseudoRandomFunctionMac(),
-				premasterSecret, Label.MASTER_SECRET_LABEL, randomSeed);
-		SecretKey masterSecret = SecretUtil.create(secret, "MAC");
-		Bytes.clear(secret);
-		return masterSecret;
+		return masterSecretDeriver.derive(randomSeed, premasterSecret, session);
 	}
 
 	protected final void setCurrentReadState() {

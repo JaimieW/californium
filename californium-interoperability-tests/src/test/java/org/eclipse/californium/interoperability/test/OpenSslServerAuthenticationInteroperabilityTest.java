@@ -210,7 +210,7 @@ public class OpenSslServerAuthenticationInteroperabilityTest {
 		dtlsBuilder.setSupportedGroups(SupportedGroup.secp256r1);
 
 		scandiumUtil.start(BIND, false, dtlsBuilder, ScandiumUtil.TRUST_ROOT, cipherSuite);
-		connect(cipher, "Shared Elliptic groups: P-256");
+		connect(cipher, "Shared Elliptic (groups|curves): P-256");
 	}
 
 	@Test
@@ -221,7 +221,7 @@ public class OpenSslServerAuthenticationInteroperabilityTest {
 		dtlsBuilder.setSupportedGroups(SupportedGroup.secp384r1, SupportedGroup.secp256r1);
 
 		scandiumUtil.start(BIND, false, dtlsBuilder, ScandiumUtil.TRUST_ROOT, cipherSuite);
-		connect(cipher, "Shared Elliptic groups: P-384");
+		connect(cipher, "Shared Elliptic (groups|curves): P-384");
 	}
 
 	@Test
@@ -252,10 +252,11 @@ public class OpenSslServerAuthenticationInteroperabilityTest {
 		String message = "Hello OpenSSL!";
 		scandiumUtil.send(message, DESTINATION, TIMEOUT_MILLIS);
 
-		assertTrue("openssl no handshake!", processUtil.waitConsole("CIPHER is " + cipher, TIMEOUT_MILLIS));
+		assertTrue("handshake failed!", processUtil.waitConsole("CIPHER is ", TIMEOUT_MILLIS));
+		assertTrue("wrong cipher suite!", processUtil.waitConsole("CIPHER is " + cipher, TIMEOUT_MILLIS));
 		if (misc != null) {
 			for (String check : misc) {
-				assertTrue(processUtil.waitConsole(check, TIMEOUT_MILLIS));
+				assertTrue("missing " + check, processUtil.waitConsole(check, TIMEOUT_MILLIS));
 			}
 		}
 		assertTrue("openssl missing message!", processUtil.waitConsole(message, TIMEOUT_MILLIS));

@@ -177,6 +177,7 @@ import org.eclipse.californium.scandium.dtls.AvailableConnections;
 import org.eclipse.californium.scandium.dtls.ClientHandshaker;
 import org.eclipse.californium.scandium.dtls.ClientHello;
 import org.eclipse.californium.scandium.dtls.Connection;
+import org.eclipse.californium.scandium.dtls.ConnectionEvictedException;
 import org.eclipse.californium.scandium.dtls.ConnectionId;
 import org.eclipse.californium.scandium.dtls.ConnectionIdGenerator;
 import org.eclipse.californium.scandium.dtls.ContentType;
@@ -454,8 +455,13 @@ public class DTLSConnector implements Connector, RecordLayer {
 						} else {
 							// failure after established (last FINISH),
 							// but before completed (first data)
-							LOGGER.warn("Handshake with [{}] failed after session was established!",
-									handshaker.getPeerAddress(), error);
+							if (error instanceof ConnectionEvictedException) {
+								LOGGER.debug("Handshake with [{}] never get APPLICATION_DATA",
+										handshaker.getPeerAddress(), error);
+							} else {
+								LOGGER.warn("Handshake with [{}] failed after session was established!",
+										handshaker.getPeerAddress(), error);
+							}
 						}
 					} else if (connection.hasEstablishedSession()) {
 						LOGGER.warn("Handshake with [{}] failed, but has an established session!",
@@ -650,23 +656,6 @@ public class DTLSConnector implements Connector, RecordLayer {
 		this.socket = socket;
 		pendingOutboundMessagesCountdown.set(config.getOutboundMessageBufferSize());
 
-		if (executorService instanceof ScheduledExecutorService) {
-			timer = (ScheduledExecutorService) executorService;
-		} else {
-			timer = ExecutorsUtil.newSingleThreadScheduledExecutor(
-					new DaemonThreadFactory("DTLS-Retransmit-Task-", NamedThreadFactory.SCANDIUM_THREAD_GROUP)); //$NON-NLS-1$
-		}
-
-		if (executorService == null) {
-			int threadCount = config.getConnectionThreadCount();
-			if (threadCount > 1) {
-				executorService = ExecutorsUtil.newFixedThreadPool(threadCount - 1,
-						new DaemonThreadFactory("DTLS-Connection-Handler-", NamedThreadFactory.SCANDIUM_THREAD_GROUP)); //$NON-NLS-1$
-			} else {
-				executorService = timer;
-			}
-			this.hasInternalExecutor = true;
-		}
 		if (bindAddress.getPort() != 0 && config.isAddressReuseEnabled()) {
 			// make it easier to stop/start a server consecutively without delays
 			LOGGER.info("Enable address reuse for socket!");
@@ -738,6 +727,25 @@ public class DTLSConnector implements Connector, RecordLayer {
 		}
 
 		lastBindAddress = new InetSocketAddress(socket.getLocalAddress(), socket.getLocalPort());
+
+		if (executorService instanceof ScheduledExecutorService) {
+			timer = (ScheduledExecutorService) executorService;
+		} else {
+			timer = ExecutorsUtil.newSingleThreadScheduledExecutor(new DaemonThreadFactory(
+					"DTLS-Timer-" + lastBindAddress + "#", NamedThreadFactory.SCANDIUM_THREAD_GROUP)); //$NON-NLS-1$
+		}
+
+		if (executorService == null) {
+			int threadCount = config.getConnectionThreadCount();
+			if (threadCount > 1) {
+				executorService = ExecutorsUtil.newFixedThreadPool(threadCount - 1, new DaemonThreadFactory(
+						"DTLS-Worker-" + lastBindAddress + "#", NamedThreadFactory.SCANDIUM_THREAD_GROUP)); //$NON-NLS-1$
+			} else {
+				executorService = timer;
+			}
+			this.hasInternalExecutor = true;
+		}
+
 		running.set(true);
 
 		int receiverThreadCount = config.getReceiverThreadCount();
@@ -767,12 +775,12 @@ public class DTLSConnector implements Connector, RecordLayer {
 			final Integer healthStatusInterval = config.getHealthStatusInterval();
 			if (healthStatusInterval != null) {
 				statusLogger = timer.scheduleAtFixedRate(new Runnable() {
-	
+
 					@Override
 					public void run() {
 						health.dump(config.getLoggingTag(), config.getMaxConnections(), connectionStore.remainingCapacity(), pendingHandshakesWithoutVerifiedPeer.get());
 					}
-	
+
 				}, healthStatusInterval, healthStatusInterval, TimeUnit.SECONDS);
 			}
 		}
@@ -1545,7 +1553,11 @@ public class DTLSConnector implements Connector, RecordLayer {
 				if (session.getPeer() != null) {
 					send(new AlertMessage(AlertLevel.WARNING, AlertDescription.CLOSE_NOTIFY, alert.getPeer()), session);
 				}
-				connection.close(record);
+				if (connection.hasEstablishedSession()) {
+					connection.close(record);
+				} else {
+					terminateConnection(connection);
+				}
 			}
 		} else if (AlertLevel.FATAL.equals(alert.getLevel())) {
 			// according to section 7.2 of the TLS 1.2 spec
@@ -1880,8 +1892,8 @@ public class DTLSConnector implements Connector, RecordLayer {
 		DTLSSession newSession = new DTLSSession(record.getPeerAddress(), record.getSequenceNumber());
 		// initialize handshaker based on CLIENT_HELLO (this accounts
 		// for the case that multiple cookie exchanges have taken place)
-		Handshaker handshaker = new ServerHandshaker(clientHello.getMessageSeq(), newSession,
-				this, connection, config, maximumTransmissionUnit);
+		Handshaker handshaker = new ServerHandshaker(clientHello.getMessageSeq(), newSession, this, connection, config,
+				maximumTransmissionUnit);
 		initializeHandshaker(handshaker);
 		handshaker.processMessage(record);
 	}
